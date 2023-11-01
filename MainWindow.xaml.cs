@@ -7,7 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Media.Media3D;
 using System.Diagnostics;
 using System.Windows.Automation;
-
+using System.Timers;
 
 namespace WPF_Language_Lab_project
 {
@@ -30,6 +30,7 @@ namespace WPF_Language_Lab_project
         
         private delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime); // NOT UNDERSTOOD!
 
+        private System.Timers.Timer timer;
         private IntPtr targetWindowHandle;
         private AutomationElement _targetWindowElement;
         private AutomationElement _learningLabElement;
@@ -49,6 +50,8 @@ namespace WPF_Language_Lab_project
         private bool forceClose = false;
 
         private LearningLabActivity learningLabActivity = null;
+        private WindowVisualState _lastWindowState;
+        private AutomationElement _windowElement;
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -74,16 +77,6 @@ namespace WPF_Language_Lab_project
             InitializeSystemTray();
             Loaded += MainWindow_Loaded;
             Closed += MainWindow_Closed;
-
-            if (_targetWindowElement != null)
-            {
-                Automation.AddAutomationPropertyChangedEventHandler(
-                    _targetWindowElement,
-                    TreeScope.Element,
-                    OnWindowPropertyChanged,
-                    AutomationElement.BoundingRectangleProperty);
-            }
-
         }
 
         private void HandleEventSubscriptions()
@@ -91,17 +84,25 @@ namespace WPF_Language_Lab_project
             if (windowEventIsSet)
             {
                 Automation.RemoveAutomationPropertyChangedEventHandler(_targetWindowElement, OnWindowPropertyChanged);
+                MonitorWindowState(_targetWindowElement, true);
+                MonitorWindowState(_learningLabElement, true);
+
                 System.Diagnostics.Debug.WriteLine("Removing TheEventHandler");
                 windowEventIsSet = false;
             }
             if (targetWindowHandle != null && !windowEventIsSet)
             {
                 _targetWindowElement = AutomationElement.FromHandle(targetWindowHandle);
+                _learningLabElement = AutomationElement.FromHandle(learningLabhandle);
+                // OnWindowPropertyChanged Handles the repositioning of the attached window (learningLab) to a target window
                 Automation.AddAutomationPropertyChangedEventHandler(
                     _targetWindowElement,
                     TreeScope.Element,
                     OnWindowPropertyChanged,
                     AutomationElement.BoundingRectangleProperty);
+                MonitorWindowState(_targetWindowElement, false);
+                MonitorWindowState(_learningLabElement, false);
+
                 System.Diagnostics.Debug.WriteLine("Adding TheEventHandler");
                 windowEventIsSet = true;
             }
@@ -148,8 +149,6 @@ namespace WPF_Language_Lab_project
             IntPtr activeWindowHandle = GetForegroundWindow();
             targetWindowHandle = activeWindowHandle;
 
-            HandleEventSubscriptions();
-
             if (ShouldAdjustWindow())
             {
                 AdjustTargetWindowAndShowLearningLab();
@@ -162,85 +161,12 @@ namespace WPF_Language_Lab_project
             {
                 CloseLearningLabActivity(false);
             }
+
+            HandleEventSubscriptions();
+
         }
-        /*private void AdjustAndPositionWindow()
-        {
-            System.Diagnostics.Debug.WriteLine("Entering AdjustAndPositionWindow");
-            IntPtr activeWindowHandle = GetForegroundWindow();
-            targetWindowHandle = activeWindowHandle;
-            //learningLabhandle = IntPtr.Zero;
-            if (windowEventIsSet) { 
-                Automation.RemoveAutomationPropertyChangedEventHandler(_targetWindowElement, OnWindowPropertyChanged);
-                System.Diagnostics.Debug.WriteLine("Removing TheEventHandler");
-                windowEventIsSet = false;
-            }
-            if (activeWindowHandle != null && !windowEventIsSet)
-            {
-                _targetWindowElement = AutomationElement.FromHandle(activeWindowHandle);
-                Automation.AddAutomationPropertyChangedEventHandler(
-                    _targetWindowElement,
-                    TreeScope.Element,
-                    OnWindowPropertyChanged,
-                    AutomationElement.BoundingRectangleProperty);
-                System.Diagnostics.Debug.WriteLine("Adding TheEventHandler");
-                windowEventIsSet = true;
 
-            }
-            IntPtr mainWindowhandle = new WindowInteropHelper(this).Handle;
-            
-            if (learningLabActivity != null)
-            {
-                learningLabhandle = new WindowInteropHelper(learningLabActivity).Handle;
-                _learningLabElement = AutomationElement.FromHandle(learningLabhandle);
-            }
-
-            // Only adjust if there is a foreground window
-            if (activeWindowHandle != IntPtr.Zero && activeWindowHandle != mainWindowhandle && activeWindowHandle != learningLabhandle && !hotkeyActivated) // This might be the problem for the exception being thrown
-            {
-                System.Diagnostics.Debug.WriteLine("Inside if-condition for valid activeWindowHandle");
-                RECT activeWindowRect;
-                GetWindowRect(activeWindowHandle, out activeWindowRect);
-
-                originalForegroundWidth = activeWindowRect.Right - activeWindowRect.Left; // Save original width
-                originalForegroundHeight = activeWindowRect.Bottom - activeWindowRect.Top; // Save original height
-
-                int width = activeWindowRect.Right - activeWindowRect.Left;
-                int height = activeWindowRect.Bottom - activeWindowRect.Top;
-
-                // Adjust the width of the active window by -200px
-                MoveWindow(activeWindowHandle, activeWindowRect.Left, activeWindowRect.Top, width - 200, height, true); // change back to true
-
-                // Show Learning Lab Popup
-                ShowLearningLabPopup();
-
-                // Position Learning Lab Popup window
-                if (learningLabActivity != null)
-                {
-                    learningLabActivity.Width = 200;
-                    learningLabActivity.Height = height;
-                    learningLabActivity.Left = activeWindowRect.Right - 200;
-                    learningLabActivity.Top = activeWindowRect.Top;
-                    learningLabhandle = new WindowInteropHelper(learningLabActivity).Handle;
-                }
-                hotkeyActivated = true;
-            }
-            //else if (activeWindowHandle != IntPtr.Zero && activeWindowHandle != mainWindowhandle && activeWindowHandle != learningLabhandle && hotkeyActivated) // New Function here
-            //{
-            //    System.Diagnostics.Debug.WriteLine("Inside if-condition for SECOND valid activeWindowHandle");
-            //}
-            else if (activeWindowHandle == IntPtr.Zero) // If there is no foreground window
-            {
-                System.Diagnostics.Debug.WriteLine("Inside if-condition for no foreground window");
-                // If there is no foreground window, show the Learning Lab Popup conventionally
-                ShowLearningLabPopup();
-            }
-            else if (activeWindowHandle == learningLabhandle) // If the learning lab window is already open, and it is the foreground window
-            {
-                System.Diagnostics.Debug.WriteLine("Inside if-condition for learningLabhandle foreground window");
-                CloseLearningLabActivity(false);
-            }
-        }*/
-
+        //      ...PropertyChanged Event Functions :
         private void OnWindowPropertyChanged(object sender, AutomationPropertyChangedEventArgs e)
         {
             System.Diagnostics.Debug.WriteLine(e);
@@ -259,26 +185,119 @@ namespace WPF_Language_Lab_project
                 MoveWindow(learningLabhandle, activeWindowRect.Right, activeWindowRect.Top, learningLabRect.Right - learningLabRect.Left, activeWindowRect.Bottom - activeWindowRect.Top, true);
             }
         }
+        void OnTargetWindowPropertyChanged(object sender, AutomationPropertyChangedEventArgs e)
+        {
+            System.Diagnostics.Debug.WriteLine("e.OldValue : " + e.OldValue);
+            System.Diagnostics.Debug.WriteLine("e.NewValue : " + e.NewValue);
+            if ((WindowVisualState)e.NewValue == WindowVisualState.Maximized)
+            {
+                // Adjust the size and position of the learningLab window
+                // to fill the entire screen except for 200 pixels on the right.
+                AdjustLearningLabAndTargetWindow(true);
+            }
+        }
+
+        void OnLearningLabPropertyChanged(object sender, AutomationPropertyChangedEventArgs e)
+        {
+            if ((WindowVisualState)e.NewValue == WindowVisualState.Maximized)
+            {
+                // Adjust the size and position of the target window
+                // to fill the entire screen except for 200 pixels on the left.
+                AdjustLearningLabAndTargetWindow(false);
+            }
+        }
+
+        void AdjustLearningLabAndTargetWindow(bool isTargetWindow)
+        {
+            // Get the screen size
+            var screenSize = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+            if (!isTargetWindow) // if it is the learning lab event handler calling this method
+            {
+                // Set the learningLab window size and position
+                SetWindowPos(learningLabhandle, IntPtr.Zero, 200, 0, screenSize.Width - 200, screenSize.Height, 0x0040);
+                SetWindowPos(targetWindowHandle, IntPtr.Zero, 0, 0, 200, screenSize.Height, 0x0040);
+            }
+            else if (isTargetWindow)
+            {
+                SetWindowPos(targetWindowHandle, IntPtr.Zero, 0, 0, screenSize.Width - 200, screenSize.Height, 0x0040);
+                SetWindowPos(learningLabhandle, IntPtr.Zero, screenSize.Width - 200, 0, 200, screenSize.Height, 0x0040);
+            }            
+
+        }
+
+        public void MonitorWindowState(AutomationElement windowElement, bool isSubscribed)
+        {
+            _lastWindowState = GetWindowVisualState(windowElement); // Problematic line ( can throw 'ElementNotAvailableException' exception )
+            _windowElement = windowElement;
+            // Start a timer to poll the window state at regular intervals
+            timer = new System.Timers.Timer(100);  // Interval in milliseconds
+            if (isSubscribed)
+            {
+                // Unsubscribing from the event
+                System.Diagnostics.Debug.WriteLine("Unsubscribing from the event " + windowElement);
+                System.Diagnostics.Debug.WriteLine("Current Subscribers List " + WindowElementElapsedEventHandler.GetInvocationList().ToString() + windowElement);
+
+                //timer.Elapsed -= (sender, e) => CheckWindowState(windowElement);
+                timer.Stop();
+                timer.Elapsed -= WindowElementElapsedEventHandler;
+            }
+            else if (!isSubscribed)
+            {
+                // Subscribing to the event
+                System.Diagnostics.Debug.WriteLine("Subscribing to the event");
+                //timer.Elapsed += (sender, e) => CheckWindowState(windowElement);
+                timer.Elapsed += WindowElementElapsedEventHandler;
+                timer.Start();
+            }
+            
+        }
+
+        private void WindowElementElapsedEventHandler(object sender, ElapsedEventArgs e)
+        {
+            CheckWindowState(_windowElement);
+        }
+
+        private void CheckWindowState(AutomationElement windowElement)
+        {
+            var currentWindowState = GetWindowVisualState(windowElement); // Problematic line ( can throw 'ElementNotAvailableException' exception )
+
+            if (currentWindowState != _lastWindowState)
+            {
+                // The window state has changed
+                System.Diagnostics.Debug.WriteLine("Window state changed from" + _lastWindowState + " to " + currentWindowState);
+                _lastWindowState = currentWindowState;
+
+                // Handle the window state change as needed
+                if (windowElement == _targetWindowElement)
+                {
+                    AdjustLearningLabAndTargetWindow(true);
+                }
+                else if (windowElement == _learningLabElement)
+                {
+                    AdjustLearningLabAndTargetWindow(true);
+                }
+            }
+        }
+
+        private WindowVisualState GetWindowVisualState(AutomationElement windowElement)
+        {
+            try
+            {
+                if (windowElement.TryGetCurrentPattern(WindowPattern.Pattern, out object pattern))
+                {
+                    var windowPattern = (WindowPattern)pattern;
+                    return windowPattern.Current.WindowVisualState; // Exception thrown here!! "System.Windows.Automation.ElementNotAvailableException: 'ElementNotAvailable'"
+                }
+            }            
+            catch (ElementNotAvailableException)
+            {
+                System.Diagnostics.Debug.WriteLine("Exception 'ElementNotAvailableException' was raised");
+            }
+            return WindowVisualState.Normal;  // Default value
+        }
 
         private string WritingRect(RECT windowRect) {
             return windowRect.Top.ToString() + ";" + windowRect.Bottom.ToString() + ";" + windowRect.Right.ToString() + ";" + windowRect.Left.ToString();
-        }
-        private void RepositionAppNextToTarget()
-        {
-            // Get the target window's position and size
-            GetWindowRect(targetWindowHandle, out RECT rect);
-
-            // Calculate your window's position and size
-            int appX = rect.Right;  
-            int appY = rect.Top;
-            int appWidth = 200;
-            int appHeight = rect.Bottom - rect.Top;
-
-            // Get your window's handle
-            IntPtr appHandle = new WindowInteropHelper(this).Handle;
-
-            // Set your window's position and size
-            MoveWindow(appHandle, appX, appY, appWidth, appHeight, true);
         }
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
@@ -297,16 +316,7 @@ namespace WPF_Language_Lab_project
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             System.Diagnostics.Debug.WriteLine("Entering MainWindow_Loaded");
-            // Find the target window (e.g., the currently active window)
-            targetWindowHandle = GetForegroundWindow();
 
-            if (targetWindowHandle != IntPtr.Zero)
-            {
-                System.Diagnostics.Debug.WriteLine("Inside if-condition for valid targetWindowHandle");
-
-                // Reposition your window initially
-                RepositionAppNextToTarget();
-            }
             IntPtr handle = new WindowInteropHelper(this).Handle;
             RegisterHotKey(handle, HOTKEY_ID, MOD_CONTROL | MOD_SHIFT, KEY_O);
             SetRunAtStartup(true);
@@ -350,7 +360,7 @@ namespace WPF_Language_Lab_project
         }
 
 
-        protected override void OnSourceInitialized(EventArgs e)
+        protected override void OnSourceInitialized(EventArgs e) // Automatically executes when the underlying Win32 window handle becomes available.
         {
             base.OnSourceInitialized(e);
             HwndSource source = PresentationSource.FromVisual(this) as HwndSource;
@@ -360,20 +370,28 @@ namespace WPF_Language_Lab_project
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             System.Diagnostics.Debug.WriteLine("Entering WndProc");
-            if (msg == 0x0312 && wParam.ToInt32() == HOTKEY_ID) // if message is WM_HOTKEY and it's ID is 9000, which is the specified Hotkey id for our Ctrl+Shift+O hotkey
+            if (msg == 0x0312 && wParam.ToInt32() == HOTKEY_ID) // if message is WM_HOTKEY and it's ID is 9000 (the specified Hotkey id for our Ctrl+Shift+O hotkey)
             {
                 System.Diagnostics.Debug.WriteLine("Inside if-condition for WM_HOTKEY and HOTKEY_ID");
-                if (learningLabActivity != null && learningLabActivity.IsLoaded)
-                {
-                    CloseLearningLabActivity(false); // Close the Learning Lab Activity
-                }
-                else
-                {
-                    AdjustAndPositionWindow(); // Show the Learning Lab Activity
-                }
+                AdjustAndPositionWindow();
+                //if (learningLabActivity != null && learningLabActivity.IsLoaded)
+                //{
+                //    CloseLearningLabActivity(false); // Close the Learning Lab Activity
+                //} 
+                //else
+                //{
+                //    AdjustAndPositionWindow(); // Show the Learning Lab Activity
+                //}
                 handled = true;
             }
             return IntPtr.Zero;
+        }
+
+        public void LearningLabPopup_Closed(object sender, EventArgs e)
+        {
+            System.Diagnostics.Debug.WriteLine("LearningLabPopup is being Closed");
+            MonitorWindowState(_targetWindowElement, true);
+            MonitorWindowState(_learningLabElement, true);
         }
 
         private void CloseLearningLabActivity(bool invokedFromEvent)
